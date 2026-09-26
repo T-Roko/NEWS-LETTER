@@ -1,0 +1,19 @@
+{
+  "tech": [
+    "https://www.numerama.com/feed/",
+    "https://www.frandroid.com/feed"
+  ],
+  "mode": [
+    "https://www.madmoizelle.com/feed"
+  ],
+  "faits-divers": [
+    "https://www.leparisien.fr/rss.xml",
+    "https://www.20minutes.fr/rss/une.xml"
+  ],
+  "actualite-generale": [
+    "https://www.lemonde.fr/rss/une.xml"
+  ],
+  "jeux-video": [
+    "https://www.jeuxvideo.com/rss/rss-news.xml"
+  ]
+}
