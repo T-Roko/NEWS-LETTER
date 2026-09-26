@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Le Digest — actu du jour</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --card: #ffffff;
+    --text: #1c1c1c;
+    --muted: #6b6b6b;
+    --accent: #1a1a1a;
+    --border: #e5e5e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111;
+      --card: #1a1a1a;
+      --text: #f0f0f0;
+      --muted: #9a9a9a;
+      --border: #2a2a2a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Georgia, 'Times New Roman', serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 48px 20px 24px;
+    text-align: center;
+  }
+  header h1 {
+    font-size: 2rem;
+    margin: 0 0 8px;
+    letter-spacing: -0.5px;
+  }
+  header p {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0;
+  }
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 0 20px 60px;
+  }
+  .category {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .category h2 {
+    margin: 0 0 12px;
+    font-size: 1.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .category ul {
+    margin: 0;
+    padding-left: 20px;
+  }
+  .category li {
+    margin-bottom: 10px;
+  }
+  .category li:last-child {
+    margin-bottom: 0;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Le Digest</h1>
+    <p>Mis à jour le {{GENERATED_AT}}</p>
+  </header>
+  <main>
+    {{SECTIONS}}
+  </main>
+</body>
+</html>
