@@ -8,13 +8,16 @@ on:
   workflow_dispatch: {}  # permet de lancer manuellement depuis l'onglet Actions
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,10 +33,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scraper.py
 
-      - name: Déployer sur GitHub Pages
+      - name: Préparer la page
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
 
-      - id: deployment
+      - name: Déployer sur GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
