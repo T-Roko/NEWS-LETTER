@@ -3,86 +3,103 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Le Digest — actu du jour</title>
+<title>Mon feed d'actu</title>
 <style>
-  :root {
-    --bg: #fafaf9;
-    --card: #ffffff;
-    --text: #1c1c1c;
-    --muted: #6b6b6b;
-    --accent: #1a1a1a;
-    --border: #e5e5e3;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111111;
-      --card: #1a1a1a;
-      --text: #f0f0f0;
-      --muted: #9a9a9a;
-      --border: #2a2a2a;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: Georgia, 'Times New Roman', serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.5;
-  }
-  header {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 48px 20px 24px;
-    text-align: center;
-  }
-  header h1 {
-    font-size: 2rem;
-    margin: 0 0 8px;
-    letter-spacing: -0.5px;
-  }
-  header p {
-    color: var(--muted);
-    font-size: 0.9rem;
-    margin: 0;
-  }
-  main {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 0 20px 60px;
-  }
-  .category {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 24px;
-    margin-bottom: 20px;
-  }
-  .category h2 {
-    margin: 0 0 12px;
-    font-size: 1.3rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .category ul {
-    margin: 0;
-    padding-left: 20px;
-  }
-  .category li {
-    margin-bottom: 10px;
-  }
-  .category li:last-child {
-    margin-bottom: 0;
-  }
+:root{--bg:#fafaf9;--card:#fff;--text:#1c1c1c;--muted:#6b6b6b;--border:#e5e5e3;--accent:#1a1a1a}
+@media(prefers-color-scheme:dark){:root{--bg:#111;--card:#1a1a1a;--text:#f0f0f0;--muted:#9a9a9a;--border:#2a2a2a;--accent:#f0f0f0}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:1.45}
+header{max-width:1000px;margin:0 auto;padding:36px 20px 16px;text-align:center}
+h1{font-family:Georgia,serif;font-size:2rem;margin:0 0 6px}
+header p{color:var(--muted);font-size:.85rem;margin:0 0 14px}
+button{font:inherit;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:999px;padding:8px 16px}
+button.main{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+#picker{max-width:640px;margin:0 auto;padding:10px 20px 40px;text-align:center}
+#chips{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:18px 0}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);background:var(--card);border-radius:999px;padding:10px 16px;cursor:pointer}
+.chip:has(input:checked){border-color:var(--accent);outline:1px solid var(--accent)}
+#hint{color:#c0392b;min-height:1.2em;font-size:.9rem}
+#feed{max-width:1000px;margin:0 auto;padding:0 20px 60px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.thumb{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:var(--border)}
+.ph{aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6a7fdb,#b56ad9);color:#fff;font-weight:600}
+.body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px;flex:1}
+.tag{font-size:.72rem;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+.card h3{font-family:Georgia,serif;font-size:1.05rem;margin:0;line-height:1.3}
+.card p{margin:0;font-size:.9rem;color:var(--muted)}
+.foot{margin-top:auto;display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted)}
+.foot a{color:var(--text);font-weight:600;text-decoration:none}
+#empty{grid-column:1/-1;text-align:center;color:var(--muted)}
 </style>
 </head>
 <body>
-  <header>
-    <h1>Le Digest</h1>
-    <p>Mis à jour le {{GENERATED_AT}}</p>
-  </header>
-  <main>
-    {{SECTIONS}}
-  </main>
+<header>
+  <h1>Mon feed d'actu</h1>
+  <p>Mis à jour le {{GENERATED_AT}}</p>
+  <button id="edit" hidden>Mes centres d'intérêt</button>
+</header>
+<section id="picker" hidden>
+  <h2>Qu'est-ce qui t'intéresse ?</h2>
+  <div id="chips"></div>
+  <div id="hint"></div>
+  <button id="save" class="main">Voir mon feed</button>
+</section>
+<main id="feed" hidden></main>
+<script>
+const DATA = {{ARTICLES_JSON}};
+const KEY = "feed-interests";
+const $ = id => document.getElementById(id);
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); return Array.isArray(v) ? v : null; } catch (e) { return null; } }
+function store(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} }
+function safeUrl(u) { return /^https?:\/\//i.test(u) ? u : ""; }
+function ago(iso) {
+  if (!iso) return "";
+  const h = Math.round((Date.now() - new Date(iso)) / 36e5);
+  return h < 1 ? "à l'instant" : h < 24 ? "il y a " + h + " h" : "il y a " + Math.round(h / 24) + " j";
+}
+let picked = load();
+
+function showPicker() {
+  $("chips").innerHTML = ""; $("hint").textContent = "";
+  for (const [key, name] of Object.entries(DATA.categories)) {
+    const lab = el("label", "chip"), cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = key; cb.checked = !!picked && picked.includes(key);
+    lab.append(cb, el("span", null, name)); $("chips").append(lab);
+  }
+  $("picker").hidden = false; $("feed").hidden = true; $("edit").hidden = true;
+}
+
+function card(a) {
+  const c = el("article", "card"), name = DATA.categories[a.category];
+  const ph = () => el("div", "ph", name);
+  if (a.image && safeUrl(a.image)) {
+    const img = el("img", "thumb"); img.src = a.image; img.loading = "lazy"; img.alt = "";
+    img.referrerPolicy = "no-referrer"; img.onerror = () => img.replaceWith(ph()); c.append(img);
+  } else c.append(ph());
+  const b = el("div", "body"), foot = el("div", "foot"), link = el("a", null, "Lire l'article →");
+  link.href = safeUrl(a.link); link.target = "_blank"; link.rel = "noopener noreferrer";
+  foot.append(el("span", null, a.source + (a.date ? " · " + ago(a.date) : "")), link);
+  b.append(el("span", "tag", name), el("h3", null, a.title));
+  if (a.summary) b.append(el("p", null, a.summary));
+  b.append(foot); c.append(b); return c;
+}
+
+function showFeed() {
+  const list = DATA.articles.filter(a => picked.includes(a.category)), feed = $("feed");
+  feed.innerHTML = "";
+  if (!list.length) { const p = el("p", null, "Rien de récent dans tes catégories pour l'instant."); p.id = "empty"; feed.append(p); }
+  list.forEach(a => feed.append(card(a)));
+  $("picker").hidden = true; feed.hidden = false; $("edit").hidden = false;
+}
+
+$("save").onclick = () => {
+  const v = [...document.querySelectorAll("#chips input:checked")].map(i => i.value);
+  if (!v.length) { $("hint").textContent = "Coche au moins une case."; return; }
+  picked = v; store(v); showFeed();
+};
+$("edit").onclick = showPicker;
+picked ? showFeed() : showPicker();
+</script>
 </body>
 </html>
