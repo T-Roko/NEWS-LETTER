@@ -1,161 +1,147 @@
-"""
-Newsletter Bot — génère une page HTML quotidienne à partir de flux RSS,
-résumée de façon objective par l'API Claude.
+"""Newsletter Bot : flux RSS -> cartes d'articles -> public/index.html
 
-Usage :
-    export ANTHROPIC_API_KEY="sk-ant-..."
-    python scraper.py
-
-Sortie : public/index.html
+Sans clé API, les cartes utilisent l'extrait fourni par le flux RSS.
+Avec ANTHROPIC_API_KEY, Claude écrit un petit résumé neutre par article.
 """
 
+import html
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 
 import feedparser
-from anthropic import Anthropic
 
-# Modèle utilisé pour la synthèse. Haiku suffit largement pour résumer
-# des titres/chapôs d'articles — rapide et peu coûteux pour un job quotidien.
 MODEL = "claude-haiku-4-5-20251001"
+BASE = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE, "config", "feeds.json")
+TEMPLATE_PATH = os.path.join(BASE, "template.html")
+OUTPUT_PATH = os.path.join(BASE, "public", "index.html")
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "feeds.json")
-OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "public", "index.html")
-TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template.html")
-
-MAX_ARTICLE_AGE_HOURS = 30  # fenêtre glissante pour un digest "quotidien"
-MAX_ARTICLES_PER_FEED = 10
-
-
-def load_feeds():
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+MAX_AGE_HOURS = 48
+MAX_PER_FEED = 10
+LABELS = {
+    "faits-divers": "Faits divers",
+    "actualite-generale": "Actualité générale",
+    "jeux-video": "Jeux vidéo",
+}
 
 
-def fetch_category_articles(feed_urls):
-    """Récupère et dédoublonne les articles récents d'une liste de flux RSS."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=MAX_ARTICLE_AGE_HOURS)
-    seen_titles = set()
+def label(cat):
+    return LABELS.get(cat, cat.replace("-", " ").capitalize())
+
+
+def clean(text, n=220):
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text if len(text) <= n else text[:n].rsplit(" ", 1)[0] + "…"
+
+
+def find_image(entry):
+    for key in ("media_thumbnail", "media_content"):
+        for m in entry.get(key, []) or []:
+            if m.get("url") and m.get("medium") != "video" and not m.get("type", "").startswith("video"):
+                return m["url"]
+    for enc in entry.get("enclosures", []) or []:
+        if enc.get("type", "").startswith("image") and enc.get("href"):
+            return enc["href"]
+    blob = entry.get("summary", "") or ""
+    for c in entry.get("content", []) or []:
+        blob += c.get("value", "")
+    m = re.search(r'<img[^>]+src=["\']([^"\']+)', blob)
+    return m.group(1) if m else ""
+
+
+def fetch_category(cat, urls, seen):
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_HOURS)
     articles = []
-
-    for url in feed_urls:
+    for url in urls:
         try:
             parsed = feedparser.parse(url)
-            if parsed.bozo and not parsed.entries:
-                print(f"  [!] flux illisible, ignoré : {url}", file=sys.stderr)
-                continue
         except Exception as exc:
             print(f"  [!] erreur sur {url} : {exc}", file=sys.stderr)
             continue
-
-        source_name = parsed.feed.get("title", url)
-
-        for entry in parsed.entries[:MAX_ARTICLES_PER_FEED]:
-            title = entry.get("title", "").strip()
-            if not title or title.lower() in seen_titles:
+        if not parsed.entries:
+            print(f"  [!] flux vide ou illisible, ignoré : {url}", file=sys.stderr)
+            continue
+        source = parsed.feed.get("title", url)
+        for e in parsed.entries[:MAX_PER_FEED]:
+            title = clean(e.get("title", ""), 200)
+            link = e.get("link", "")
+            if not title or not link or title.lower() in seen:
                 continue
-
-            # Filtre par date quand elle est disponible ; sinon on garde
-            # l'article (certains flux n'exposent pas de date fiable).
-            published = entry.get("published_parsed")
-            if published:
-                pub_dt = datetime(*published[:6], tzinfo=timezone.utc)
-                if pub_dt < cutoff:
+            pub = e.get("published_parsed") or e.get("updated_parsed")
+            date = ""
+            if pub:
+                dt = datetime(*pub[:6], tzinfo=timezone.utc)
+                if dt < cutoff:
                     continue
-
-            seen_titles.add(title.lower())
-            articles.append(
-                {
-                    "title": title,
-                    "summary": (entry.get("summary", "") or "")[:500],
-                    "link": entry.get("link", ""),
-                    "source": source_name,
-                }
-            )
-
+                date = dt.isoformat()
+            seen.add(title.lower())
+            excerpt = clean(e.get("summary", ""))
+            articles.append({
+                "category": cat, "title": title, "link": link, "source": source,
+                "date": date, "image": find_image(e), "excerpt": excerpt, "summary": excerpt,
+            })
     return articles
 
 
-def summarize_category(client, category_name, articles):
-    """Demande à Claude une synthèse factuelle et neutre d'une catégorie."""
-    if not articles:
-        return "Aucune actualité récente trouvée pour cette catégorie."
-
-    articles_text = "\n\n".join(
-        f"- [{a['source']}] {a['title']}\n  {a['summary']}"
-        for a in articles
+def add_summaries(client, cat, articles):
+    if not client or not articles:
+        return
+    listing = "\n".join(f"{i}. {a['title']} : {a['excerpt']}" for i, a in enumerate(articles))
+    prompt = (
+        f"Voici {len(articles)} articles de la catégorie \"{label(cat)}\" :\n\n{listing}\n\n"
+        "Pour chaque article, écris UN résumé factuel et neutre en français (25 mots maximum), "
+        "sans opinion et sans rien inventer. Réponds uniquement par un tableau JSON de "
+        f"{len(articles)} chaînes, dans le même ordre, sans aucun autre texte."
     )
-
-    prompt = f"""Voici une liste brute d'articles récents dans la catégorie "{category_name}", \
-issus de plusieurs médias :
-
-{articles_text}
-
-Rédige une synthèse courte et factuelle de l'actualité du jour dans cette catégorie, en français.
-Consignes :
-- Reste strictement factuel et neutre, sans ton éditorial ni opinion.
-- Regroupe les sujets qui se recoupent entre plusieurs sources.
-- Format : une liste à puces, une puce par sujet distinct, 1-2 phrases par puce.
-- N'invente aucune information absente des articles fournis.
-- Ne mets aucun préambule, seulement la liste."""
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return response.content[0].text
+    try:
+        r = client.messages.create(model=MODEL, max_tokens=2000, messages=[{"role": "user", "content": prompt}])
+        text = re.sub(r"^```(?:json)?|```$", "", r.content[0].text.strip(), flags=re.M).strip()
+        result = json.loads(text)
+        if isinstance(result, list) and len(result) == len(articles):
+            for a, s in zip(articles, result):
+                if isinstance(s, str) and s.strip():
+                    a["summary"] = s.strip()
+    except Exception as exc:
+        print(f"  [!] résumés IA impossibles, extraits RSS utilisés : {exc}", file=sys.stderr)
 
 
-def render_html(sections, generated_at):
-    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
-        template = f.read()
-
-    sections_html = ""
-    for category, content_md in sections.items():
-        bullets = "\n".join(
-            f"<li>{line.lstrip('-').strip()}</li>"
-            for line in content_md.splitlines()
-            if line.strip().startswith("-")
-        ) or f"<li>{content_md}</li>"
-
-        sections_html += f"""
-        <section class="category">
-          <h2>{category.replace('-', ' ').capitalize()}</h2>
-          <ul>{bullets}</ul>
-        </section>
-        """
-
-    html = template.replace("{{SECTIONS}}", sections_html)
-    html = html.replace("{{GENERATED_AT}}", generated_at)
-    return html
+def make_client():
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        print("[i] Pas de clé API : extraits RSS utilisés à la place des résumés.")
+        return None
+    from anthropic import Anthropic
+    return Anthropic(api_key=key)
 
 
 def main():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        sys.exit("Erreur : la variable d'environnement ANTHROPIC_API_KEY n'est pas définie.")
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        feeds = json.load(f)
+    client = make_client()
+    seen, articles = set(), []
+    for cat, urls in feeds.items():
+        print(f"[*] Catégorie : {cat}")
+        found = fetch_category(cat, urls, seen)
+        print(f"    {len(found)} article(s)")
+        add_summaries(client, cat, found)
+        articles += found
+    articles.sort(key=lambda a: a["date"], reverse=True)
 
-    client = Anthropic(api_key=api_key)
-    feeds_by_category = load_feeds()
+    generated = datetime.now(timezone.utc).strftime("%d/%m/%Y à %H:%M UTC")
+    data = {"categories": {c: label(c) for c in feeds}, "articles": articles}
+    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    blob = blob.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
-    sections = {}
-    for category, urls in feeds_by_category.items():
-        print(f"[*] Catégorie : {category}")
-        articles = fetch_category_articles(urls)
-        print(f"    {len(articles)} article(s) trouvé(s)")
-        sections[category] = summarize_category(client, category, articles)
-
-    generated_at = datetime.now(timezone.utc).strftime("%d/%m/%Y à %H:%M UTC")
-    html = render_html(sections, generated_at)
-
+    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        page = f.read().replace("{{GENERATED_AT}}", generated).replace("{{ARTICLES_JSON}}", blob)
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        f.write(html)
-
-    print(f"[+] Page générée : {OUTPUT_PATH}")
+        f.write(page)
+    print(f"[+] Page générée : {OUTPUT_PATH} ({len(articles)} articles)")
 
 
 if __name__ == "__main__":
